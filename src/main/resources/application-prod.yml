@@ -1,0 +1,27 @@
+# 生产环境配置
+# 注意：敏感信息通过环境变量注入，不要直接写在这里
+spring:
+  application:
+    name: yu-ai-agent
+  ai:
+    dashscope:
+      # 从环境变量读取 API Key，容器启动时通过 -e DASHSCOPE_API_KEY=xxx 传入
+      api-key: ${DASHSCOPE_API_KEY:}
+      chat:
+        options:
+          model: qwen-plus
+    ollama:
+      # 生产环境通常不需要本地 ollama，注释掉以避免干扰
+      # base-url: http://localhost:11434
+      # chat:
+      #   model: gemma3:1b
+
+# search-api
+search-api:
+  # 从环境变量读取，容器启动时通过 -e SEARCH_API_KEY=xxx 传入
+  api-key: ${SEARCH_API_KEY:}
+
+# 日志级别：生产环境关闭 DEBUG，减少日志输出量
+logging:
+  level:
+    org.springframework.ai: INFO

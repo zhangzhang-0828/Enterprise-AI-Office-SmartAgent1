@@ -1,0 +1,18 @@
+# 排除 node_modules（前端项目）
+yu-ai-agent-frontend/node_modules
+
+# 排除 Maven 构建产物（不需要，容器里会重新构建）
+target
+
+# 排除 Git 仓库
+.git
+.gitignore
+
+# 排除 IDE 配置
+.idea
+.vscode
+*.iml
+
+# 排除本地配置文件（不要把本地凭据带进镜像）
+*.md
+.DS_Store
