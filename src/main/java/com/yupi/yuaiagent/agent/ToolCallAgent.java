@@ -29,41 +29,26 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ToolCallAgent extends ReActAgent {
 
-    // 可用的工具
     private final ToolCallback[] availableTools;
-
-    // 保存工具调用信息的响应结果（要调用那些工具）
     private ChatResponse toolCallChatResponse;
-
-    // 工具调用管理者
     private final ToolCallingManager toolCallingManager;
-
-    // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
     private final ChatOptions chatOptions;
 
     public ToolCallAgent(ToolCallback[] availableTools) {
         super();
         this.availableTools = availableTools;
         this.toolCallingManager = ToolCallingManager.builder().build();
-        // 禁用 Spring AI 内置的工具调用机制，自己维护选项和消息上下文
         this.chatOptions = DashScopeChatOptions.builder()
                 .withInternalToolExecutionEnabled(false)
                 .build();
     }
 
-    /**
-     * 处理当前状态并决定下一步行动
-     *
-     * @return 是否需要执行行动
-     */
     @Override
     public boolean think() {
-        // 1、校验提示词，拼接用户提示词
         if (StrUtil.isNotBlank(getNextStepPrompt())) {
             UserMessage userMessage = new UserMessage(getNextStepPrompt());
             getMessageList().add(userMessage);
         }
-        // 2、调用 AI 大模型，获取工具调用结果
         List<Message> messageList = getMessageList();
         Prompt prompt = new Prompt(messageList, this.chatOptions);
         try {
@@ -72,14 +57,9 @@ public class ToolCallAgent extends ReActAgent {
                     .toolCallbacks(availableTools)
                     .call()
                     .chatResponse();
-            // 记录响应，用于等下 Act
             this.toolCallChatResponse = chatResponse;
-            // 3、解析工具调用结果，获取要调用的工具
-            // 助手消息
             AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
-            // 获取要调用的工具列表
             List<AssistantMessage.ToolCall> toolCallList = assistantMessage.getToolCalls();
-            // 输出提示信息
             String result = assistantMessage.getText();
             log.info(getName() + "的思考：" + result);
             log.info(getName() + "选择了 " + toolCallList.size() + " 个工具来使用");
@@ -87,13 +67,10 @@ public class ToolCallAgent extends ReActAgent {
                     .map(toolCall -> String.format("工具名称：%s，参数：%s", toolCall.name(), toolCall.arguments()))
                     .collect(Collectors.joining("\n"));
             log.info(toolCallInfo);
-            // 如果不需要调用工具，返回 false
             if (toolCallList.isEmpty()) {
-                // 只有不调用工具时，才需要手动记录助手消息
                 getMessageList().add(assistantMessage);
                 return false;
             } else {
-                // 需要调用工具时，无需记录助手消息，因为调用工具时会自动记录
                 return true;
             }
         } catch (Exception e) {
@@ -103,11 +80,6 @@ public class ToolCallAgent extends ReActAgent {
         }
     }
 
-    /**
-     * 执行工具调用并处理结果
-     *
-     * @return 执行结果
-     */
     @Override
     public String act() {
         if (!toolCallChatResponse.hasToolCalls()) {

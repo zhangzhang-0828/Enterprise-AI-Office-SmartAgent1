@@ -23,5 +23,10 @@ public enum AgentState {
     /**
      * 错误状态
      */
-    ERROR
+    ERROR,
+
+    /**
+     * 卡死状态：循环检测发现智能体陷入重复响应，强制终止
+     */
+    STUCK
 }

@@ -42,19 +42,6 @@
         </div>
         <button class="card-action" type="button">开始对话</button>
       </article>
-
-      <article class="app-card card-vision" @click="navigateTo('/multimodal')">
-        <div class="card-icon" aria-hidden="true">🖼️</div>
-        <div class="card-copy">
-          <h2>AI 图片理解</h2>
-          <p>上传任意图片，AI 为你解读图表、分析截图、识别代码或解读梗图。</p>
-        </div>
-        <div class="card-meta">
-          <span>多模态</span>
-          <span>图文问答</span>
-        </div>
-        <button class="card-action" type="button">立即体验</button>
-      </article>
     </section>
 
     <AppFooter />
@@ -204,15 +191,6 @@ const navigateTo = (path) => {
 
 .card-agent .card-icon {
   background: linear-gradient(135deg, rgba(59, 130, 246, 0.18), rgba(99, 102, 241, 0.22));
-}
-
-.card-vision .card-icon {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(168, 85, 247, 0.22));
-}
-
-.card-vision .card-meta span {
-  background: rgba(139, 92, 246, 0.08);
-  color: #7c3aed;
 }
 
 .card-copy h2 {

@@ -29,12 +29,13 @@ import { useRouter } from 'vue-router'
 import { useHead } from '@vueuse/head'
 import ChatRoom from '../components/ChatRoom.vue'
 import AppFooter from '../components/AppFooter.vue'
-import { chatWithLoveApp } from '../api'
+import { chatWithLoveApp, chatWithLoveAppWithImage } from '../api'
 import {
   buildErrorMessage,
   closeSseConnection,
   CONNECTION_STATUS,
   createMessage,
+  createSSEParser,
   generateChatId
 } from '../utils/chat'
 
@@ -57,7 +58,10 @@ const messages = ref([])
 const chatId = ref('')
 const connectionStatus = ref(CONNECTION_STATUS.IDLE)
 const lastSubmittedMessage = ref('')
+const lastSubmittedImage = ref(null)
 let eventSource = null
+let abortController = null
+let cancelSSE = null
 
 const subtitle = computed(() => `当前会话：${chatId.value || '正在初始化'}，支持流式回复与连续追问。`)
 
@@ -91,10 +95,18 @@ const removeEmptyAssistantMessage = (messageId) => {
 }
 
 const cancelStream = () => {
-  if (!eventSource) return
-
-  closeSseConnection(eventSource)
-  eventSource = null
+  if (eventSource) {
+    closeSseConnection(eventSource)
+    eventSource = null
+  }
+  if (abortController) {
+    abortController.abort()
+    abortController = null
+  }
+  if (cancelSSE) {
+    cancelSSE()
+    cancelSSE = null
+  }
   connectionStatus.value = CONNECTION_STATUS.IDLE
 }
 
@@ -110,16 +122,19 @@ const handleStreamError = (placeholderId) => {
   })
 }
 
-const sendMessage = (message) => {
+const sendMessage = (message, imageFile = null) => {
   const trimmedMessage = message.trim()
-  if (!trimmedMessage) return
+  if (!trimmedMessage && !imageFile) return
 
   cancelStream()
 
   lastSubmittedMessage.value = trimmedMessage
+  lastSubmittedImage.value = imageFile
+  const userImageUrl = imageFile ? URL.createObjectURL(imageFile) : null
   addMessage(trimmedMessage, {
     isUser: true,
-    type: 'user-question'
+    type: 'user-question',
+    imageUrl: userImageUrl
   })
 
   const aiMessage = addMessage('', {
@@ -129,34 +144,80 @@ const sendMessage = (message) => {
   })
 
   connectionStatus.value = CONNECTION_STATUS.CONNECTING
-  eventSource = chatWithLoveApp(trimmedMessage, chatId.value)
 
-  eventSource.onmessage = (event) => {
-    const data = event.data
+  if (imageFile) {
+    // 多模态：POST + FormData
+    const { promise, controller } = chatWithLoveAppWithImage(trimmedMessage, chatId.value, imageFile)
+    abortController = controller
 
-    if (data === '[DONE]') {
-      connectionStatus.value = CONNECTION_STATUS.IDLE
-      aiMessage.status = CONNECTION_STATUS.IDLE
-      closeSseConnection(eventSource)
-      eventSource = null
-      return
+    promise.then(async (body) => {
+      if (!body) {
+        aiMessage.content = '服务器返回了空响应'
+        aiMessage.status = CONNECTION_STATUS.ERROR
+        aiMessage.type = 'system'
+        connectionStatus.value = CONNECTION_STATUS.ERROR
+        return
+      }
+      const reader = body.getReader()
+      const decoder = new TextDecoder()
+      connectionStatus.value = CONNECTION_STATUS.STREAMING
+      aiMessage.status = CONNECTION_STATUS.STREAMING
+      cancelSSE = createSSEParser(reader, decoder, {
+        onChunk: (data) => {
+          if (data === '[DONE]') return
+          aiMessage.content += data
+        },
+        onDone: () => {
+          connectionStatus.value = CONNECTION_STATUS.IDLE
+          aiMessage.status = CONNECTION_STATUS.IDLE
+          cancelSSE = null
+        },
+        onError: (err) => {
+          if (err.name !== 'AbortError') {
+            aiMessage.content = '读取流失败: ' + err.message
+            aiMessage.status = CONNECTION_STATUS.ERROR
+            aiMessage.type = 'system'
+            connectionStatus.value = CONNECTION_STATUS.ERROR
+          }
+          cancelSSE = null
+        }
+      })
+    }).catch(err => {
+      if (err.name !== 'AbortError') {
+        aiMessage.content = '请求失败: ' + err.message
+        aiMessage.status = CONNECTION_STATUS.ERROR
+        aiMessage.type = 'system'
+        connectionStatus.value = CONNECTION_STATUS.ERROR
+      }
+    })
+  } else {
+    // 纯文本：GET + EventSource
+    eventSource = chatWithLoveApp(trimmedMessage, chatId.value)
+
+    eventSource.onmessage = (event) => {
+      const data = event.data
+      if (data === '[DONE]') {
+        connectionStatus.value = CONNECTION_STATUS.IDLE
+        aiMessage.status = CONNECTION_STATUS.IDLE
+        closeSseConnection(eventSource)
+        eventSource = null
+        return
+      }
+      if (!data) return
+      connectionStatus.value = CONNECTION_STATUS.STREAMING
+      aiMessage.status = CONNECTION_STATUS.STREAMING
+      aiMessage.content += data
     }
 
-    if (!data) return
-
-    connectionStatus.value = CONNECTION_STATUS.STREAMING
-    aiMessage.status = CONNECTION_STATUS.STREAMING
-    aiMessage.content += data
-  }
-
-  eventSource.onerror = () => {
-    handleStreamError(aiMessage.id)
+    eventSource.onerror = () => {
+      handleStreamError(aiMessage.id)
+    }
   }
 }
 
 const retryLastMessage = () => {
   if (!lastSubmittedMessage.value) return
-  sendMessage(lastSubmittedMessage.value)
+  sendMessage(lastSubmittedMessage.value, lastSubmittedImage.value)
 }
 
 const goBack = () => {

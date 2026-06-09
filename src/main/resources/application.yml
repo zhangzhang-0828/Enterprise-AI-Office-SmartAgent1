@@ -3,21 +3,17 @@ spring:
     name: yu-ai-agent
   profiles:
     active: local
-# 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
-
-
-# MCP 服务配置
-#    mcp:
-#      client:
-#        # SSE 模式（需要手动启动 MCP 服务器）
-#        sse:
-#          connections:
-#            server1:
-#              url: http://localhost:8127
-        # stdio 模式（自动启动 MCP 服务器）
-#        stdio:
-#          servers-configuration: classpath:mcp-servers.json
-# 临时注释掉，便于大家开发调试和部署（实际需要启动 PgVector 数据库）
+  # MCP 服务配置（默认关闭；启用时把下面 4 行解开注释即可。
+  # 启用前请先启动一个 MCP Server，端口默认 8127，详见 McpController 注释）
+  # ai:
+  #   mcp:
+  #     client:
+  #       sse:
+  #         connections:
+  #           server1:
+  #             url: http://localhost:8127
+  # 临时注释掉，便于大家开发调试和部署（实际填写 PgVector 数据库信息）
+  # 临时注释掉，便于大家开发调试和部署（实际需要启动 PgVector 数据库）
 #    vectorstore:
 #      pgvector:
 #        index-type: HNSW
@@ -49,6 +45,19 @@ knife4j:
 search-api:
   # 需要替换为你自己的 key
   api-key: 2xeUkFVViSEEshXu14vw829J
+# 对象存储配置（MinIO / 阿里云 OSS / AWS S3 通用，关闭则 PDF 回退到本地保存）
+oss:
+  enabled: true  # 设为 true 启用对象存储；生产环境强烈建议启用
+  endpoint: http://localhost:9000  # MinIO 地址；阿里云 OSS 改为 https://oss-cn-hangzhou.aliyuncs.com
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: yu-ai-agent
+  # 用于拼接公开访问 URL（用户复制这个 URL 就能直接下载 PDF）
+  # MinIO 本地：http://localhost:9000/yu-ai-agent
+  # 阿里云 OSS：https://你的bucket.oss-cn-hangzhou.aliyuncs.com
+  public-base-url: http://localhost:9000/yu-ai-agent
+  path-style-access: true   # MinIO 必填 true；阿里云 / AWS 必填 false
+  region: us-east-1         # MinIO 任意；阿里云填 cn-hangzhou 等真实 region
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
   level:

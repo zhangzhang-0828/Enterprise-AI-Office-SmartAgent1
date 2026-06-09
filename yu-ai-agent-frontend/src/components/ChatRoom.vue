@@ -22,7 +22,7 @@
             </div>
             <div class="message-body">
               <div class="message-bubble">
-                <div class="message-content">{{ msg.content }}</div>
+                <div class="message-content" v-html="renderMarkdown(msg.content)"></div>
                 <span
                   v-if="showTypingIndicator(msg)"
                   class="typing-indicator"
@@ -39,6 +39,7 @@
           <div v-else class="message user-message" :class="[msg.type]">
             <div class="message-body">
               <div class="message-bubble">
+                <img v-if="msg.imageUrl" :src="msg.imageUrl" class="message-image" alt="我上传的图片" />
                 <div class="message-content">{{ msg.content }}</div>
               </div>
               <div class="message-meta">
@@ -74,6 +75,22 @@
 
       <div class="chat-input-container">
         <div class="chat-input">
+          <div class="input-toolbar">
+            <label class="image-upload-btn" :class="{ 'has-image': previewImage }" title="上传图片（支持 JPG/PNG/GIF/WebP）">
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                class="file-input"
+                :disabled="isBusy"
+                @change="handleImageSelect"
+              />
+              <span class="upload-icon">{{ previewImage ? '🖼️' : '📷' }}</span>
+              <span v-if="previewImage" class="clear-image" @click.stop="clearImage">✕</span>
+            </label>
+            <div v-if="previewImage" class="image-preview-wrapper">
+              <img :src="previewImage" class="image-preview" alt="预览" />
+            </div>
+          </div>
           <textarea
             ref="inputRef"
             v-model="inputMessage"
@@ -87,7 +104,7 @@
           <button
             type="button"
             class="send-button"
-            :disabled="isBusy || !trimmedMessage"
+            :disabled="isBusy || !canSend"
             @click="handleSend"
           >
             {{ isBusy ? '生成中...' : '发送' }}
@@ -100,8 +117,14 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { marked } from 'marked'
 import AiAvatarFallback from './AiAvatarFallback.vue'
 import { CONNECTION_STATUS } from '../utils/chat'
+
+const renderMarkdown = (content) => {
+  if (!content) return ''
+  return marked.parse(content)
+}
 
 const props = defineProps({
   messages: {
@@ -151,8 +174,11 @@ const emit = defineEmits(['send-message', 'cancel', 'retry', 'go-back'])
 const inputMessage = ref('')
 const messagesContainer = ref(null)
 const inputRef = ref(null)
+const selectedImageFile = ref(null)
+const previewImage = ref('')
 
 const trimmedMessage = computed(() => inputMessage.value.trim())
+const canSend = computed(() => trimmedMessage.value || selectedImageFile.value)
 const normalizedStatus = computed(() => props.connectionStatus || CONNECTION_STATUS.IDLE)
 const isBusy = computed(() => normalizedStatus.value === CONNECTION_STATUS.CONNECTING || normalizedStatus.value === CONNECTION_STATUS.STREAMING)
 
@@ -183,11 +209,30 @@ const resetTextarea = async () => {
 }
 
 const handleSend = async () => {
-  if (!trimmedMessage.value || isBusy.value) return
+  if (!canSend.value || isBusy.value) return
 
-  emit('send-message', trimmedMessage.value)
+  emit('send-message', trimmedMessage.value, selectedImageFile.value)
   inputMessage.value = ''
+  selectedImageFile.value = null
+  previewImage.value = ''
   await resetTextarea()
+}
+
+const handleImageSelect = (event) => {
+  const file = event.target.files?.[0]
+  if (!file) return
+  if (file.size > 10 * 1024 * 1024) {
+    alert('图片大小不能超过 10MB')
+    event.target.value = ''
+    return
+  }
+  selectedImageFile.value = file
+  previewImage.value = URL.createObjectURL(file)
+}
+
+const clearImage = () => {
+  selectedImageFile.value = null
+  previewImage.value = ''
 }
 
 const handleKeydown = (event) => {
@@ -419,6 +464,106 @@ onMounted(() => {
   font-size: 0.98rem;
 }
 
+/* Markdown rendered content */
+.message-content :deep(h1),
+.message-content :deep(h2),
+.message-content :deep(h3),
+.message-content :deep(h4) {
+  margin: 0.7em 0 0.35em;
+  font-weight: 700;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.message-content :deep(h1) { font-size: 1.15rem; }
+.message-content :deep(h2) { font-size: 1.05rem; }
+.message-content :deep(h3) { font-size: 0.98rem; }
+
+.message-content :deep(p) {
+  margin: 0.4em 0;
+}
+
+.message-content :deep(strong) {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.message-content :deep(em) {
+  font-style: italic;
+  color: #475569;
+}
+
+.message-content :deep(code) {
+  background: rgba(99, 102, 241, 0.08);
+  color: #4338ca;
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+  font-size: 0.88em;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+}
+
+.message-content :deep(pre) {
+  background: #f1f5f9;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+
+.message-content :deep(pre code) {
+  background: none;
+  color: #334155;
+  padding: 0;
+  font-size: 0.87em;
+}
+
+.message-content :deep(ul),
+.message-content :deep(ol) {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+
+.message-content :deep(li) {
+  margin: 0.25em 0;
+  line-height: 1.7;
+}
+
+.message-content :deep(blockquote) {
+  margin: 0.5em 0;
+  padding: 0.5em 0.85em;
+  background: rgba(99, 102, 241, 0.06);
+  border-left: 3px solid rgba(99, 102, 241, 0.4);
+  border-radius: 0 6px 6px 0;
+  color: #475569;
+}
+
+.message-content :deep(hr) {
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+  margin: 0.85em 0;
+}
+
+.message-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+}
+
+.message-content :deep(th),
+.message-content :deep(td) {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+
+.message-content :deep(th) {
+  background: rgba(99, 102, 241, 0.07);
+  font-weight: 600;
+  color: #334155;
+}
+
 .message-meta {
   display: flex;
   align-items: center;
@@ -477,6 +622,99 @@ onMounted(() => {
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: rgba(255, 255, 255, 0.92);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.input-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.image-upload-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 12px;
+  border: 1.5px dashed rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.05);
+  color: #6366f1;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.image-upload-btn:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.55);
+}
+
+.image-upload-btn.has-image {
+  border-style: solid;
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.image-upload-btn .file-input {
+  display: none;
+}
+
+.upload-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.clear-image {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.55rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1;
+  line-height: 1;
+}
+
+.image-preview-wrapper {
+  display: flex;
+  align-items: flex-end;
+}
+
+.image-preview {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 10px;
+  object-fit: cover;
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.message-image {
+  max-width: 280px;
+  max-height: 200px;
+  border-radius: 12px;
+  margin-bottom: 0.5rem;
+  object-fit: cover;
+  display: block;
+}
+
+.user-message .message-image {
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.ai-message .message-image {
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .input-box {

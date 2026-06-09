@@ -27,15 +27,6 @@ const routes = [
       title: 'AI超级智能体 - kyrieAI超级智能体应用平台',
       description: 'AI超级智能体是kyrieAI超级智能体应用平台的全能助手，能解答各类专业问题，提供精准建议和解决方案'
     }
-  },
-  {
-    path: '/multimodal',
-    name: 'Multimodal',
-    component: () => import('../views/MultimodalChat.vue'),
-    meta: {
-      title: 'AI图片理解助手 - kyrieAI超级智能体应用平台',
-      description: '上传图片让AI为你解读、分析，支持图表识别、代码截图分析、梗图解读等多模态对话'
-    }
   }
 ]
 
