@@ -3,13 +3,13 @@ package com.yupi.yuaiagent.controller;
 import com.yupi.yuaiagent.agent.YuManus;
 import com.yupi.yuaiagent.app.LoveApp;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
 
@@ -17,6 +17,7 @@ import java.io.IOException;
 
 @RestController
 @RequestMapping("/ai")
+@Slf4j
 public class AiController {
 
     @Resource
@@ -28,78 +29,90 @@ public class AiController {
     @Resource
     private ChatModel dashscopeChatModel;
 
-    /**
-     * 同步调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
+    // ==================== 恋爱大师接口 ====================
+
     @GetMapping("/love_app/chat/sync")
     public String doChatWithLoveAppSync(String message, String chatId) {
         return loveApp.doChat(message, chatId);
     }
 
-    /**
-     * SSE 流式调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<String> doChatWithLoveAppSSE(String message, String chatId) {
         return loveApp.doChatByStream(message, chatId);
     }
 
-    /**
-     * SSE 流式调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
-     */
     @GetMapping(value = "/love_app/chat/server_sent_event")
     public Flux<ServerSentEvent<String>> doChatWithLoveAppServerSentEvent(String message, String chatId) {
         return loveApp.doChatByStream(message, chatId)
-                .map(chunk -> ServerSentEvent.<String>builder()
-                        .data(chunk)
-                        .build());
+                .map(chunk -> ServerSentEvent.<String>builder().data(chunk).build());
+    }
+
+    @GetMapping(value = "/love_app/chat/sse_emitter")
+    public SseEmitter doChatWithLoveAppSseEmitter(String message, String chatId) {
+        SseEmitter sseEmitter = new SseEmitter(180000L);
+        loveApp.doChatByStream(message, chatId)
+                .subscribe(
+                        chunk -> {
+                            try {
+                                sseEmitter.send(chunk);
+                            } catch (IOException e) {
+                                sseEmitter.completeWithError(e);
+                            }
+                        },
+                        sseEmitter::completeWithError,
+                        sseEmitter::complete);
+        return sseEmitter;
     }
 
     /**
-     * SSE 流式调用 AI 恋爱大师应用
-     *
-     * @param message
-     * @param chatId
-     * @return
+     * 恋爱大师多模态对话（POST，支持图片上传）
      */
-    @GetMapping(value = "/love_app/chat/sse_emitter")
-    public SseEmitter doChatWithLoveAppServerSseEmitter(String message, String chatId) {
-        // 创建一个超时时间较长的 SseEmitter
-        SseEmitter sseEmitter = new SseEmitter(180000L); // 3 分钟超时
-        // 获取 Flux 响应式数据流并且直接通过订阅推送给 SseEmitter
-        loveApp.doChatByStream(message, chatId)
-                .subscribe(chunk -> {
+    @PostMapping(value = "/love_app/chat/sse_emitter")
+    public SseEmitter doChatWithLoveAppSseEmitterWithImage(
+            @RequestParam("message") String message,
+            @RequestParam(value = "chatId", defaultValue = "") String chatId,
+            @RequestParam(value = "image", required = false) MultipartFile image) {
+        SseEmitter sseEmitter = new SseEmitter(180000L);
+        Flux<String> flux;
+        if (image != null && !image.isEmpty()) {
+            try {
+                flux = loveApp.doChatByStreamWithImage(message, chatId, image.getBytes(), image.getContentType());
+            } catch (IOException e) {
+                log.error("读取图片失败，降级为纯文本模式", e);
+                flux = loveApp.doChatByStream(message, chatId);
+            }
+        } else {
+            flux = loveApp.doChatByStream(message, chatId);
+        }
+        flux.subscribe(
+                chunk -> {
                     try {
                         sseEmitter.send(chunk);
                     } catch (IOException e) {
                         sseEmitter.completeWithError(e);
                     }
-                }, sseEmitter::completeWithError, sseEmitter::complete);
-        // 返回
+                },
+                sseEmitter::completeWithError,
+                sseEmitter::complete);
         return sseEmitter;
     }
 
-    /**
-     * 流式调用 Manus 超级智能体
-     *
-     * @param message
-     * @return
-     */
+    // ==================== 超级智能体接口 ====================
+
     @GetMapping("/manus/chat")
     public SseEmitter doChatWithManus(String message) {
         YuManus yuManus = new YuManus(allTools, dashscopeChatModel);
         return yuManus.runStream(message);
+    }
+
+    /**
+     * 超级智能体多模态对话（POST，支持图片上传）
+     */
+    @PostMapping("/manus/chat")
+    public SseEmitter doChatWithManusWithImage(
+            @RequestParam("message") String message,
+            @RequestParam(value = "image", required = false) MultipartFile image) {
+        YuManus yuManus = new YuManus(allTools, dashscopeChatModel);
+        return yuManus.runStreamWithImage(message, image);
     }
 }

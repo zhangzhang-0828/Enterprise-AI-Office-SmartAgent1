@@ -8,11 +8,18 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.content.Media;
+import com.alibaba.cloud.ai.dashscope.chat.MessageFormat;
+import com.alibaba.cloud.ai.dashscope.common.DashScopeApiConstants;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.util.MimeTypeUtils;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -170,6 +177,133 @@ public abstract class BaseAgent {
         sseEmitter.send(message);
         sseEmitter.send(DONE_MESSAGE);
         sseEmitter.complete();
+    }
+
+    /**
+     * 带图片的流式对话入口。
+     * 有图片时自动使用视觉模型（qwen-vl-plus）。
+     *
+     * @param userPrompt 用户消息
+     * @param image      图片文件（可为 null）
+     */
+    public SseEmitter runStreamWithImage(String userPrompt, MultipartFile image) {
+        return runStreamWithImage(userPrompt, image, null, null);
+    }
+
+    /**
+     * 带图片的流式对话入口（完整参数版）
+     *
+     * @param userPrompt      用户消息
+     * @param image          图片文件（可为 null）
+     * @param useVisionModel 是否强制用视觉模型（null 时：有图片则用，无图片则不用）
+     * @param visionModelName 视觉模型名（null 时默认为 qwen-vl-plus）
+     */
+    public SseEmitter runStreamWithImage(String userPrompt, MultipartFile image,
+                                         Boolean useVisionModel, String visionModelName) {
+        SseEmitter sseEmitter = new SseEmitter(300000L);
+        CompletableFuture.runAsync(() -> {
+            try {
+                if (this.state != AgentState.IDLE) {
+                    sendAndComplete(sseEmitter, "错误：无法从状态运行代理：" + this.state);
+                    return;
+                }
+                if (StrUtil.isBlank(userPrompt)) {
+                    sendAndComplete(sseEmitter, "错误：不能使用空提示词运行代理");
+                    return;
+                }
+            } catch (Exception e) {
+                sseEmitter.completeWithError(e);
+                return;
+            }
+
+            this.state = AgentState.RUNNING;
+            addUserMessageWithImage(userPrompt, image);
+            try {
+                for (int i = 0; i < maxSteps && state != AgentState.FINISHED; i++) {
+                    int stepNumber = i + 1;
+                    currentStep = stepNumber;
+                    log.info("Executing step {}/{}", stepNumber, maxSteps);
+                    String stepResult = step();
+                    if (StrUtil.isNotBlank(stepResult)) {
+                        sseEmitter.send(stepResult);
+                    }
+                }
+                if (currentStep >= maxSteps) {
+                    state = AgentState.FINISHED;
+                    sseEmitter.send("执行结束：达到最大步骤（" + maxSteps + "）");
+                }
+                sseEmitter.send(DONE_MESSAGE);
+                sseEmitter.complete();
+            } catch (Exception e) {
+                state = AgentState.ERROR;
+                log.error("error executing agent", e);
+                try {
+                    sseEmitter.send("执行错误：" + e.getMessage());
+                    sseEmitter.send(DONE_MESSAGE);
+                    sseEmitter.complete();
+                } catch (IOException ex) {
+                    sseEmitter.completeWithError(ex);
+                }
+            } finally {
+                this.cleanup();
+            }
+        });
+
+        sseEmitter.onTimeout(() -> {
+            this.state = AgentState.ERROR;
+            this.cleanup();
+            log.warn("SSE connection timeout");
+        });
+        sseEmitter.onCompletion(() -> {
+            if (this.state == AgentState.RUNNING) {
+                this.state = AgentState.FINISHED;
+            }
+            this.cleanup();
+            log.info("SSE connection completed");
+        });
+        return sseEmitter;
+    }
+
+    /**
+     * 将用户消息（含图片）添加到消息列表。
+     * 有图片时用 qwen-vl-plus，无图片时用默认模型。
+     */
+    protected void addUserMessageWithImage(String text, MultipartFile image) {
+        boolean hasImage = image != null && !image.isEmpty();
+        log.info("[addUserMessageWithImage] hasImage={}, contentType={}, size={}, text=[{}]",
+                hasImage,
+                image != null ? image.getContentType() : "null",
+                image != null ? image.getSize() : -1,
+                text);
+        String finalText = text;
+        if (hasImage && StrUtil.isBlank(finalText)) {
+            finalText = "请分析这张图片并回答用户的问题。";
+        }
+        if (!hasImage) {
+            messageList.add(new UserMessage(finalText));
+            log.info("[addUserMessageWithImage] 无图片，纯文本消息已添加");
+            return;
+        }
+        try {
+            String mimeType = image.getContentType();
+            if (mimeType == null) {
+                mimeType = "image/jpeg";
+                log.warn("[addUserMessageWithImage] contentType 为 null，强制设为 image/jpeg");
+            }
+            Media media = Media.builder()
+                    .mimeType(MimeTypeUtils.parseMimeType(mimeType))
+                    .data(new ByteArrayResource(image.getBytes()))
+                    .build();
+            messageList.add(UserMessage.builder()
+                    .text(finalText)
+                    .media(media)
+                    .metadata(Map.of(DashScopeApiConstants.MESSAGE_FORMAT, MessageFormat.IMAGE))
+                    .build());
+            log.info("[addUserMessageWithImage] 带图片消息已添加，mimeType={}", mimeType);
+        } catch (IOException e) {
+            log.error("[addUserMessageWithImage] 读取图片失败，降级为纯文本消息", e);
+            messageList.add(new UserMessage(finalText));
+        }
     }
 
     /**
