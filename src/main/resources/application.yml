@@ -2,7 +2,22 @@ spring:
   application:
     name: yu-ai-agent
   profiles:
-    active: local
+    active: local    # 默认激活 local profile，从 application-local.yml 读取本地真实值
+  datasource:
+    # ====== 数据库配置（占位符，真实值在 application-local.yml 或环境变量里）======
+    # 加载优先级：环境变量 > application-{profile}.yml 中的同名配置 > 这里的默认值
+    # 注意：url/username/password 必须有值，application-local.yml 已提供真实值
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/yu_ai_agent}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 30000
+  sql:
+    init:
+      mode: never          # 表结构已手动在 RDS 建好，不再每次启动执行 schema.sql
+      continue-on-error: false
   # MCP 服务配置（默认关闭；启用时把下面 4 行解开注释即可。
   # 启用前请先启动一个 MCP Server，端口默认 8127，详见 McpController 注释）
   # ai:
@@ -41,24 +56,29 @@ knife4j:
   enable: true
   setting:
     language: zh_cn
-# searchAPI
+# searchAPI（真实 key 放到 application-local.yml）
 search-api:
-  # 需要替换为你自己的 key
-  api-key: 2xeUkFVViSEEshXu14vw829J
+  api-key: ${SEARCH_API_KEY}
 # 对象存储配置（MinIO / 阿里云 OSS / AWS S3 通用，关闭则 PDF 回退到本地保存）
 oss:
   enabled: true  # 设为 true 启用对象存储；生产环境强烈建议启用
-  endpoint: http://localhost:9000  # MinIO 地址；阿里云 OSS 改为 https://oss-cn-hangzhou.aliyuncs.com
-  access-key: minioadmin
-  secret-key: minioadmin
-  bucket: yu-ai-agent
+  endpoint: ${OSS_ENDPOINT:http://localhost:9000}  # MinIO 地址；阿里云 OSS 改为 https://oss-cn-hangzhou.aliyuncs.com
+  access-key: ${OSS_ACCESS_KEY:minioadmin}
+  secret-key: ${OSS_SECRET_KEY:minioadmin}
+  bucket: ${OSS_BUCKET:yu-ai-agent}
   # 用于拼接公开访问 URL（用户复制这个 URL 就能直接下载 PDF）
   # MinIO 本地：http://localhost:9000/yu-ai-agent
   # 阿里云 OSS：https://你的bucket.oss-cn-hangzhou.aliyuncs.com
-  public-base-url: http://localhost:9000/yu-ai-agent
+  public-base-url: ${OSS_PUBLIC_BASE_URL:http://localhost:9000/yu-ai-agent}
   path-style-access: true   # MinIO 必填 true；阿里云 / AWS 必填 false
-  region: us-east-1         # MinIO 任意；阿里云填 cn-hangzhou 等真实 region
+  region: ${OSS_REGION:us-east-1}  # MinIO 任意；阿里云填 cn-hangzhou 等真实 region
 # 修改日志级别，查看 Spring AI 更多调用细节
 logging:
   level:
     org.springframework.ai: DEBUG
+
+# JWT 认证配置（密钥在 application-local.yml 中配置）
+auth:
+  jwt:
+    secret: ${JWT_SECRET:your-256-bit-secret-key-change-this-in-production-32chars!}   # 生产环境请改为随机 32+ 字符密钥
+    expires-in-ms: 604800000   # 7 天，单位毫秒
